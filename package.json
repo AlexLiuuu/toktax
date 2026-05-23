@@ -1,6 +1,6 @@
 {
   "name": "toktax",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "See how much your AI coding agents actually cost — zero config, zero code changes.",
   "type": "module",
   "bin": {
