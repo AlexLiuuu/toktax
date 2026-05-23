@@ -23,6 +23,7 @@ function sourceLabel(name: string): string {
   const labels: Record<string, string> = {
     "claude-code": chalk.hex("#FF8700")("Claude Code"),
     codex: chalk.green("Codex"),
+    gemini: chalk.hex("#4285F4")("Gemini CLI"),
     cursor: chalk.hex("#1E90FF")("Cursor"),
   };
   return labels[name] ?? name;
@@ -34,11 +35,14 @@ function applyPricing(records: UsageRecord[], pricing: PricingCalculator): void 
       const provider =
         (r.extra.provider as string) || pricing.guessProvider(r.model);
       if (!provider) continue;
-      const cost = pricing.calculate(
+      let cost = pricing.calculate(
         provider, r.model, r.inputTokens, r.outputTokens,
         r.cacheReadTokens, r.cacheWriteTokens,
       );
-      if (cost !== null) r.estimatedCostUsd = cost;
+      if (cost !== null) {
+        if (r.extra.speed === "fast") cost *= 2;
+        r.estimatedCostUsd = cost;
+      }
     }
   }
 }

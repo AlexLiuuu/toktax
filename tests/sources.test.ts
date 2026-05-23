@@ -38,21 +38,26 @@ function makeClaudeJsonl(baseDir: string): string {
     JSON.stringify({ type: "user", message: { content: "hello" } }),
     JSON.stringify({
       type: "assistant",
+      uuid: "uuid-1",
       timestamp: "2025-05-20T10:00:00Z",
       message: {
+        id: "msg-1",
         model: "claude-opus-4-6",
         usage: {
           input_tokens: 1000,
           output_tokens: 500,
           cache_read_input_tokens: 5000,
           cache_creation_input_tokens: 200,
+          speed: "standard",
         },
       },
     }),
     JSON.stringify({
       type: "assistant",
+      uuid: "uuid-2",
       timestamp: "2025-05-20T10:05:00Z",
       message: {
+        id: "msg-2",
         model: "claude-opus-4-6",
         usage: { input_tokens: 2000, output_tokens: 800 },
       },
@@ -180,7 +185,8 @@ describe("ClaudeCodeSource", () => {
 
     const { ClaudeCodeSource } = await import("../src/sources/claude-code.js");
     const records = await new ClaudeCodeSource().readAll();
-    expect(records).toHaveLength(4);
+    // Same uuids in both dirs → deduplicated to 2
+    expect(records).toHaveLength(2);
   });
 
   it("deduplicates symlinked files", async () => {
@@ -195,6 +201,102 @@ describe("ClaudeCodeSource", () => {
     const { ClaudeCodeSource } = await import("../src/sources/claude-code.js");
     const records = await new ClaudeCodeSource().readAll();
     expect(records).toHaveLength(2);
+  });
+
+  it("deduplicates records by uuid", async () => {
+    const projects = path.join(tmpDir, "projects");
+    const projectDir = path.join(projects, "test-project");
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    const entry = JSON.stringify({
+      type: "assistant",
+      uuid: "dup-uuid",
+      timestamp: "2025-05-20T10:00:00Z",
+      message: {
+        id: "msg-dup",
+        model: "claude-opus-4-6",
+        usage: { input_tokens: 100, output_tokens: 50 },
+      },
+    });
+
+    fs.writeFileSync(path.join(projectDir, "session-1.jsonl"), entry + "\n");
+    fs.writeFileSync(path.join(projectDir, "session-2.jsonl"), entry + "\n");
+
+    process.env.CLAUDE_CONFIG_DIR = tmpDir;
+
+    const { ClaudeCodeSource } = await import("../src/sources/claude-code.js");
+    const records = await new ClaudeCodeSource().readAll();
+    expect(records).toHaveLength(1);
+  });
+
+  it("uses costUSD when available", async () => {
+    const projects = path.join(tmpDir, "projects");
+    const projectDir = path.join(projects, "test-project");
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    const entry = JSON.stringify({
+      type: "assistant",
+      uuid: "cost-uuid",
+      timestamp: "2025-05-20T10:00:00Z",
+      costUSD: 0.42,
+      message: {
+        id: "msg-cost",
+        model: "claude-opus-4-6",
+        usage: { input_tokens: 100, output_tokens: 50 },
+      },
+    });
+    fs.writeFileSync(path.join(projectDir, "session-cost.jsonl"), entry + "\n");
+    process.env.CLAUDE_CONFIG_DIR = tmpDir;
+
+    const { ClaudeCodeSource } = await import("../src/sources/claude-code.js");
+    const records = await new ClaudeCodeSource().readAll();
+    expect(records[0].estimatedCostUsd).toBe(0.42);
+  });
+
+  it("captures speed from usage field", async () => {
+    const projects = path.join(tmpDir, "projects");
+    const projectDir = path.join(projects, "test-project");
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    const entry = JSON.stringify({
+      type: "assistant",
+      uuid: "fast-uuid",
+      timestamp: "2025-05-20T10:00:00Z",
+      message: {
+        id: "msg-fast",
+        model: "claude-opus-4-6",
+        usage: { input_tokens: 100, output_tokens: 50, speed: "fast" },
+      },
+    });
+    fs.writeFileSync(path.join(projectDir, "session-fast.jsonl"), entry + "\n");
+    process.env.CLAUDE_CONFIG_DIR = tmpDir;
+
+    const { ClaudeCodeSource } = await import("../src/sources/claude-code.js");
+    const records = await new ClaudeCodeSource().readAll();
+    expect(records[0].extra.speed).toBe("fast");
+  });
+
+  it("filters out synthetic model entries", async () => {
+    const projects = path.join(tmpDir, "projects");
+    const projectDir = path.join(projects, "test-project");
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    const entry = JSON.stringify({
+      type: "assistant",
+      uuid: "synth-uuid",
+      timestamp: "2025-05-20T10:00:00Z",
+      message: {
+        id: "msg-synth",
+        model: "<synthetic>",
+        usage: { input_tokens: 100, output_tokens: 50 },
+      },
+    });
+    fs.writeFileSync(path.join(projectDir, "session-synth.jsonl"), entry + "\n");
+    process.env.CLAUDE_CONFIG_DIR = tmpDir;
+
+    const { ClaudeCodeSource } = await import("../src/sources/claude-code.js");
+    const records = await new ClaudeCodeSource().readAll();
+    expect(records).toHaveLength(0);
   });
 
   it("falls back to ~/.config/claude/projects/", async () => {

@@ -1,8 +1,9 @@
 import type { SourceInfo, UsageRecord } from "../types.js";
 import { ClaudeCodeSource } from "./claude-code.js";
 import { CodexSource } from "./codex.js";
+import { GeminiSource } from "./gemini.js";
 
-const ALL_SOURCES: SourceInfo[] = [new ClaudeCodeSource(), new CodexSource()];
+const ALL_SOURCES: SourceInfo[] = [new ClaudeCodeSource(), new CodexSource(), new GeminiSource()];
 
 export function discoverSources(): SourceInfo[] {
   return ALL_SOURCES.filter((s) => s.isAvailable());

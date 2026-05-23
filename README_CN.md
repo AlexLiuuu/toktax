@@ -68,6 +68,7 @@ TokTax 自动发现本地文件系统中的使用数据：
 |------|---------|----------|
 | [Claude Code](https://github.com/anthropics/claude-code) | `~/.claude/projects/**/*.jsonl` | Token、模型、缓存、会话 |
 | [Codex CLI](https://github.com/openai/codex) | `~/.codex/state_5.sqlite` | Token、模型、会话 |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `~/.gemini/tmp/*/chats/*.jsonl` | Token、模型、缓存、会话 |
 
 所有数据都在本地处理，不会发送到任何外部服务。
 

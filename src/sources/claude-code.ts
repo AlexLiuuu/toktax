@@ -45,6 +45,7 @@ export class ClaudeCodeSource implements SourceInfo {
     if (dirs.length === 0) return [];
 
     const seenFiles = new Set<string>();
+    const seenUuids = new Set<string>();
     const records: UsageRecord[] = [];
 
     for (const projectsDir of dirs) {
@@ -92,7 +93,7 @@ export class ClaudeCodeSource implements SourceInfo {
           if (d.type !== "assistant") continue;
 
           const msg = (d.message ?? {}) as Record<string, unknown>;
-          const usage = msg.usage as Record<string, number> | undefined;
+          const usage = msg.usage as Record<string, number | string> | undefined;
           if (!usage) continue;
 
           const tsStr = d.timestamp as string | undefined;
@@ -101,17 +102,33 @@ export class ClaudeCodeSource implements SourceInfo {
           const ts = new Date(tsStr);
           if (isNaN(ts.getTime())) continue;
 
+          const uuid = d.uuid as string | undefined;
+          const msgId = msg.id as string | undefined;
+          const dedupKey = uuid ?? msgId;
+          if (dedupKey) {
+            if (seenUuids.has(dedupKey)) continue;
+            seenUuids.add(dedupKey);
+          }
+
+          const model = (msg.model as string) ?? "unknown";
+          if (model === "<synthetic>") continue;
+
+          const speed = (usage.speed as string) ?? (d.speed as string) ?? "";
+          const costUSD = typeof d.costUSD === "number" ? d.costUSD : 0;
+
           records.push(
             createUsageRecord({
               timestamp: ts,
               source: this.name,
               sessionId,
-              model: (msg.model as string) ?? "unknown",
-              inputTokens: usage.input_tokens ?? 0,
-              outputTokens: usage.output_tokens ?? 0,
-              cacheReadTokens: usage.cache_read_input_tokens ?? 0,
-              cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+              model,
+              inputTokens: (usage.input_tokens as number) ?? 0,
+              outputTokens: (usage.output_tokens as number) ?? 0,
+              cacheReadTokens: (usage.cache_read_input_tokens as number) ?? 0,
+              cacheWriteTokens: (usage.cache_creation_input_tokens as number) ?? 0,
+              estimatedCostUsd: costUSD,
               project,
+              extra: { speed },
             })
           );
         }
