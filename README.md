@@ -15,7 +15,7 @@ npx toktax
 | Tool | Data Source |
 | ---- | ---------- |
 | [Claude Code](https://github.com/anthropics/claude-code) | `~/.claude/projects/**/*.jsonl` |
-| [Codex CLI](https://github.com/openai/codex) | `~/.codex/state_5.sqlite` |
+| [Codex CLI](https://github.com/openai/codex) | `~/.codex/sessions/**/*.jsonl` |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `~/.gemini/tmp/*/chats/*.jsonl` |
 
 All data is read locally. Nothing is sent anywhere.

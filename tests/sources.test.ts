@@ -7,14 +7,12 @@ let tmpDir: string;
 let originalHome: string | undefined;
 let originalClaudeDir: string | undefined;
 let originalCodexHome: string | undefined;
-let originalCodexSqliteHome: string | undefined;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "toktax-test-"));
   originalHome = process.env.HOME;
   originalClaudeDir = process.env.CLAUDE_CONFIG_DIR;
   originalCodexHome = process.env.CODEX_HOME;
-  originalCodexSqliteHome = process.env.CODEX_SQLITE_HOME;
 });
 
 afterEach(() => {
@@ -25,8 +23,6 @@ afterEach(() => {
   else delete process.env.CLAUDE_CONFIG_DIR;
   if (originalCodexHome !== undefined) process.env.CODEX_HOME = originalCodexHome;
   else delete process.env.CODEX_HOME;
-  if (originalCodexSqliteHome !== undefined) process.env.CODEX_SQLITE_HOME = originalCodexSqliteHome;
-  else delete process.env.CODEX_SQLITE_HOME;
 });
 
 function makeClaudeJsonl(baseDir: string): string {
@@ -75,35 +71,52 @@ function makeClaudeJsonl(baseDir: string): string {
   return baseDir;
 }
 
-async function makeCodexDb(dir: string): Promise<string> {
-  const dbPath = path.join(dir, "state_5.sqlite");
-  const initSqlJs = (await import("sql.js")).default;
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
+function makeCodexSession(sessionsDir: string, filename = "rollout-test.jsonl"): string {
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const filePath = path.join(sessionsDir, filename);
 
-  db.run(`
-    CREATE TABLE threads (
-      id TEXT PRIMARY KEY,
-      model_provider TEXT,
-      model TEXT,
-      tokens_used INTEGER,
-      title TEXT,
-      cwd TEXT,
-      created_at INTEGER,
-      updated_at INTEGER
-    )
-  `);
-  db.run("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
-    "t1", "openai", "gpt-5.5", 5000, "test thread", "/home/user/project", 1716199200, 1716201000,
-  ]);
-  db.run("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
-    "t2", "openai", "gpt-4o", 3000, "another thread", "/home/user/other", 1716300000, 1716300600,
-  ]);
+  const lines = [
+    JSON.stringify({
+      timestamp: "2025-06-01T10:00:00Z",
+      type: "session_meta",
+      payload: { id: "session-1", timestamp: "2025-06-01T10:00:00Z", cwd: "/home/user/project" },
+    }),
+    JSON.stringify({
+      timestamp: "2025-06-01T10:01:00Z",
+      type: "turn_context",
+      payload: { turn_id: "turn-1", model: "gpt-5.5", cwd: "/home/user/project" },
+    }),
+    JSON.stringify({
+      timestamp: "2025-06-01T10:01:05Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: { input_tokens: 3000, cached_input_tokens: 1000, output_tokens: 500, total_tokens: 3500 },
+          total_token_usage: { input_tokens: 3000, cached_input_tokens: 1000, output_tokens: 500, total_tokens: 3500 },
+        },
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2025-06-01T10:02:00Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: { input_tokens: 2000, cached_input_tokens: 800, output_tokens: 300, total_tokens: 2300 },
+          total_token_usage: { input_tokens: 5000, cached_input_tokens: 1800, output_tokens: 800, total_tokens: 5800 },
+        },
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2025-06-01T10:03:00Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: null },
+    }),
+  ];
 
-  const data = db.export();
-  db.close();
-  fs.writeFileSync(dbPath, Buffer.from(data));
-  return dbPath;
+  fs.writeFileSync(filePath, lines.join("\n") + "\n");
+  return filePath;
 }
 
 describe("ClaudeCodeSource", () => {
@@ -317,8 +330,9 @@ describe("ClaudeCodeSource", () => {
 
 describe("CodexSource", () => {
   it("reads valid records", async () => {
-    await makeCodexDb(tmpDir);
-    process.env.CODEX_SQLITE_HOME = tmpDir;
+    const sessionsDir = path.join(tmpDir, "sessions");
+    makeCodexSession(sessionsDir);
+    process.env.CODEX_HOME = tmpDir;
 
     const { CodexSource } = await import("../src/sources/codex.js");
     const source = new CodexSource();
@@ -329,20 +343,24 @@ describe("CodexSource", () => {
   });
 
   it("parses record fields correctly", async () => {
-    await makeCodexDb(tmpDir);
-    process.env.CODEX_SQLITE_HOME = tmpDir;
+    const sessionsDir = path.join(tmpDir, "sessions");
+    makeCodexSession(sessionsDir);
+    process.env.CODEX_HOME = tmpDir;
 
     const { CodexSource } = await import("../src/sources/codex.js");
     const records = await new CodexSource().readAll();
     const r = records[0];
     expect(r.source).toBe("codex");
     expect(r.model).toBe("gpt-5.5");
-    expect(r.inputTokens).toBe(5000);
-    expect(r.sessionId).toBe("t1");
+    expect(r.inputTokens).toBe(3000);
+    expect(r.outputTokens).toBe(500);
+    expect(r.cacheReadTokens).toBe(1000);
+    expect(r.sessionId).toBe("session-1");
+    expect(r.project).toBe("project");
   });
 
-  it("returns unavailable when no db exists", async () => {
-    process.env.CODEX_SQLITE_HOME = path.join(tmpDir, "nonexistent");
+  it("returns unavailable when no sessions dir exists", async () => {
+    process.env.CODEX_HOME = path.join(tmpDir, "nonexistent");
 
     const { CodexSource } = await import("../src/sources/codex.js");
     const source = new CodexSource();
@@ -352,11 +370,10 @@ describe("CodexSource", () => {
 
   it("respects CODEX_HOME env var", async () => {
     const customDir = path.join(tmpDir, "custom-codex");
-    fs.mkdirSync(customDir, { recursive: true });
-    await makeCodexDb(customDir);
+    const sessionsDir = path.join(customDir, "sessions");
+    makeCodexSession(sessionsDir);
 
     process.env.CODEX_HOME = customDir;
-    delete process.env.CODEX_SQLITE_HOME;
 
     const { CodexSource } = await import("../src/sources/codex.js");
     const source = new CodexSource();
@@ -364,20 +381,18 @@ describe("CodexSource", () => {
     expect(await source.readAll()).toHaveLength(2);
   });
 
-  it("prioritizes CODEX_SQLITE_HOME over CODEX_HOME", async () => {
-    const sqliteDir = path.join(tmpDir, "sqlite-dir");
-    fs.mkdirSync(sqliteDir, { recursive: true });
-    await makeCodexDb(sqliteDir);
-
-    const codexDir = path.join(tmpDir, "codex-dir");
-    fs.mkdirSync(codexDir, { recursive: true });
-
-    process.env.CODEX_SQLITE_HOME = sqliteDir;
-    process.env.CODEX_HOME = codexDir;
+  it("skips token_count events without info", async () => {
+    const sessionsDir = path.join(tmpDir, "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const lines = [
+      JSON.stringify({ timestamp: "2025-06-01T10:00:00Z", type: "session_meta", payload: { id: "s1", cwd: "/tmp" } }),
+      JSON.stringify({ timestamp: "2025-06-01T10:01:00Z", type: "event_msg", payload: { type: "token_count", info: null } }),
+    ];
+    fs.writeFileSync(path.join(sessionsDir, "test.jsonl"), lines.join("\n") + "\n");
+    process.env.CODEX_HOME = tmpDir;
 
     const { CodexSource } = await import("../src/sources/codex.js");
-    const source = new CodexSource();
-    expect(source.isAvailable()).toBe(true);
-    expect(await source.readAll()).toHaveLength(2);
+    const records = await new CodexSource().readAll();
+    expect(records).toHaveLength(0);
   });
 });

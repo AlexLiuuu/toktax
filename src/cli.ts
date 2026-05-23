@@ -130,7 +130,7 @@ async function showDashboard(): Promise<void> {
     console.log(chalk.dim("No AI tool data found."));
     console.log("  TokTax looks for:");
     console.log("  • Claude Code  (~/.claude/projects/)");
-    console.log("  • Codex CLI    (~/.codex/state_5.sqlite)");
+    console.log("  • Codex CLI    (~/.codex/sessions/)");
     return;
   }
 

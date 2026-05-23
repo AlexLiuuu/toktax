@@ -41,6 +41,7 @@ export class GeminiSource implements SourceInfo {
     if (dirs.length === 0) return [];
 
     const seenFiles = new Set<string>();
+    const seenIds = new Set<string>();
     const records: UsageRecord[] = [];
 
     for (const tmpDir of dirs) {
@@ -61,7 +62,7 @@ export class GeminiSource implements SourceInfo {
         try {
           files = fs
             .readdirSync(chatsDir)
-            .filter((f) => f.endsWith(".jsonl"));
+            .filter((f) => f.endsWith(".jsonl") || f.endsWith(".json"));
         } catch {
           continue;
         }
@@ -85,7 +86,8 @@ export class GeminiSource implements SourceInfo {
             continue;
           }
 
-          let sessionId = path.basename(file, ".jsonl");
+          const ext = path.extname(file);
+          let sessionId = path.basename(file, ext);
           let project = "";
 
           const lines = content.split("\n");
@@ -109,6 +111,12 @@ export class GeminiSource implements SourceInfo {
 
             if (d.type !== "gemini") continue;
 
+            const msgId = d.id as string | undefined;
+            if (msgId) {
+              if (seenIds.has(msgId)) continue;
+              seenIds.add(msgId);
+            }
+
             const tokens = d.tokens as Record<string, number> | undefined;
             if (!tokens) continue;
 
@@ -118,17 +126,28 @@ export class GeminiSource implements SourceInfo {
             const ts = new Date(tsStr);
             if (isNaN(ts.getTime())) continue;
 
+            const rawInput = tokens.input ?? tokens.prompt ?? tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
+            const rawOutput = tokens.output ?? tokens.candidates ?? tokens.output_tokens ?? tokens.candidates_tokens ?? 0;
+            const cached = tokens.cached ?? tokens.cached_tokens ?? 0;
+            const thoughts = tokens.thoughts ?? tokens.reasoning ?? tokens.thoughts_tokens ?? tokens.reasoning_tokens ?? 0;
+
+            const inputTokens = rawInput - Math.min(rawInput, cached);
+            const outputTokens = rawOutput + thoughts;
+
+            if (inputTokens === 0 && outputTokens === 0 && cached === 0) continue;
+
             records.push(
               createUsageRecord({
                 timestamp: ts,
                 source: this.name,
                 sessionId,
                 model: (d.model as string) ?? "unknown",
-                inputTokens: tokens.input ?? 0,
-                outputTokens: tokens.output ?? 0,
-                cacheReadTokens: tokens.cached ?? 0,
+                inputTokens,
+                outputTokens,
+                cacheReadTokens: cached,
                 cacheWriteTokens: 0,
                 project,
+                extra: thoughts > 0 ? { thoughtsTokens: thoughts } : {},
               })
             );
           }

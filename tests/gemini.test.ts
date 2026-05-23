@@ -89,7 +89,7 @@ describe("GeminiSource", () => {
     expect(records).toHaveLength(2);
   });
 
-  it("parses first record fields correctly", async () => {
+  it("deducts cache overlap from input tokens", async () => {
     const chatsDir = path.join(tmpDir, "user1", "chats");
     makeGeminiSession(chatsDir);
     process.env.GEMINI_DATA_DIR = tmpDir;
@@ -99,14 +99,15 @@ describe("GeminiSource", () => {
     const r = records[0];
     expect(r.source).toBe("gemini");
     expect(r.model).toBe("gemini-2.5-pro");
-    expect(r.inputTokens).toBe(100);
+    // input=100, cached=30 → inputTokens = 100 - min(100,30) = 70
+    expect(r.inputTokens).toBe(70);
     expect(r.outputTokens).toBe(50);
     expect(r.cacheReadTokens).toBe(30);
     expect(r.sessionId).toBe("abc-123");
     expect(r.project).toBe("proj-hash-1");
   });
 
-  it("handles records without cache tokens", async () => {
+  it("adds thoughts tokens to output", async () => {
     const chatsDir = path.join(tmpDir, "user1", "chats");
     makeGeminiSession(chatsDir);
     process.env.GEMINI_DATA_DIR = tmpDir;
@@ -114,9 +115,12 @@ describe("GeminiSource", () => {
     const { GeminiSource } = await import("../src/sources/gemini.js");
     const records = await new GeminiSource().readAll();
     const r = records[1];
+    // input=200, cached=0 → inputTokens = 200
     expect(r.inputTokens).toBe(200);
-    expect(r.outputTokens).toBe(80);
+    // output=80, thoughts=50 → outputTokens = 130
+    expect(r.outputTokens).toBe(130);
     expect(r.cacheReadTokens).toBe(0);
+    expect(r.extra.thoughtsTokens).toBe(50);
   });
 
   it("returns unavailable when no dirs exist", async () => {
@@ -166,5 +170,66 @@ describe("GeminiSource", () => {
     const { GeminiSource } = await import("../src/sources/gemini.js");
     const records = await new GeminiSource().readAll();
     expect(records).toHaveLength(0);
+  });
+
+  it("deduplicates by message id", async () => {
+    const chatsDir = path.join(tmpDir, "user1", "chats");
+    fs.mkdirSync(chatsDir, { recursive: true });
+
+    const msg = JSON.stringify({
+      id: "dup-msg",
+      timestamp: "2025-06-01T10:01:00Z",
+      type: "gemini",
+      model: "gemini-2.5-pro",
+      tokens: { input: 100, output: 50, cached: 0, total: 150 },
+    });
+    fs.writeFileSync(path.join(chatsDir, "s1.jsonl"), msg + "\n" + msg + "\n");
+    process.env.GEMINI_DATA_DIR = tmpDir;
+
+    const { GeminiSource } = await import("../src/sources/gemini.js");
+    const records = await new GeminiSource().readAll();
+    expect(records).toHaveLength(1);
+  });
+
+  it("filters out zero-token events", async () => {
+    const chatsDir = path.join(tmpDir, "user1", "chats");
+    fs.mkdirSync(chatsDir, { recursive: true });
+
+    const msg = JSON.stringify({
+      id: "zero-msg",
+      timestamp: "2025-06-01T10:01:00Z",
+      type: "gemini",
+      model: "gemini-2.5-pro",
+      tokens: { input: 0, output: 0, cached: 0, total: 0 },
+    });
+    fs.writeFileSync(path.join(chatsDir, "s1.jsonl"), msg + "\n");
+    process.env.GEMINI_DATA_DIR = tmpDir;
+
+    const { GeminiSource } = await import("../src/sources/gemini.js");
+    const records = await new GeminiSource().readAll();
+    expect(records).toHaveLength(0);
+  });
+
+  it("reads .json files alongside .jsonl", async () => {
+    const chatsDir = path.join(tmpDir, "user1", "chats");
+    fs.mkdirSync(chatsDir, { recursive: true });
+
+    const lines = [
+      JSON.stringify({ sessionId: "json-session", projectHash: "p1", startTime: "2025-06-01T10:00:00Z" }),
+      JSON.stringify({
+        id: "jm-1",
+        timestamp: "2025-06-01T10:01:00Z",
+        type: "gemini",
+        model: "gemini-2.5-flash",
+        tokens: { input: 50, output: 25, cached: 0, total: 75 },
+      }),
+    ];
+    fs.writeFileSync(path.join(chatsDir, "chat.json"), lines.join("\n") + "\n");
+    process.env.GEMINI_DATA_DIR = tmpDir;
+
+    const { GeminiSource } = await import("../src/sources/gemini.js");
+    const records = await new GeminiSource().readAll();
+    expect(records).toHaveLength(1);
+    expect(records[0].sessionId).toBe("json-session");
   });
 });

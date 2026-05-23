@@ -37,8 +37,7 @@
   "homepage": "https://github.com/AlexLiuuu/toktax",
   "dependencies": {
     "chalk": "^4.1.2",
-    "commander": "^13.0.0",
-    "sql.js": "^1.12.0"
+    "commander": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
