@@ -1,6 +1,6 @@
 # TokTax
 
-**One command to see your AI coding agent costs — zero config.**
+**Track your total token usage and costs across all AI coding agents — one command, zero config.**
 
 ![toktax demo](./assets/image.png)
 
