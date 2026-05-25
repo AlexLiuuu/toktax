@@ -27,7 +27,9 @@
     "cost-tracking",
     "claude-code",
     "codex",
-    "ai-agent"
+    "gemini-cli",
+    "ai-agent",
+    "ai-cost"
   ],
   "license": "MIT",
   "repository": {

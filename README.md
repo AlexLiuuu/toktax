@@ -23,7 +23,3 @@ All data is read locally. Nothing is sent anywhere.
 ## License
 
 MIT
-
----
-
-[中文文档](README_CN.md)
